@@ -82,7 +82,7 @@ def send_telegram_photo(image_bytes: bytes, caption: str = "") -> None:
 # ---------------------------------------------------------------------------
 # جلب بيانات السعر الحية ورسم الشارت
 # ---------------------------------------------------------------------------
-def fetch_ohlc(interval: str = "1min", outputsize: int = 100) -> pd.DataFrame:
+def fetch_ohlc(interval: str = "1min", outputsize: int = 50) -> pd.DataFrame:
     url = (
         "https://api.twelvedata.com/time_series"
         f"?symbol={SYMBOL}&interval={interval}&outputsize={outputsize}"
@@ -109,11 +109,17 @@ def render_chart(df: pd.DataFrame) -> bytes:
         style="charles",
         title=f"{SYMBOL} - Live (1m)",
         volume=False,
-        savefig=dict(fname=buf, dpi=150, bbox_inches="tight"),
+        figsize=(6, 4),
+        savefig=dict(fname=buf, dpi=90, bbox_inches="tight"),
     )
     plt.close("all")
     buf.seek(0)
-    return buf.read()
+    data = buf.read()
+    buf.close()
+    del df
+    import gc
+    gc.collect()
+    return data
 
 
 # ---------------------------------------------------------------------------
