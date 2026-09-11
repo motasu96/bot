@@ -160,7 +160,7 @@ def ask_gemini_text(question: str) -> str:
         return "لم يتم ضبط GEMINI_API_KEY بعد."
     payload = {"contents": [{"parts": [{"text": question}]}]}
     try:
-        resp = requests.post(GEMINI_TEXT_API, json=payload, timeout=20)
+        resp = requests.post(GEMINI_TEXT_API, json=payload, timeout=45)
         resp.raise_for_status()
         result = resp.json()
         return result["candidates"][0]["content"]["parts"][0]["text"].strip()
