@@ -1,18 +1,18 @@
 """
-TradingView -> Gemini -> Telegram Bot (+ محادثة تفاعلية مع تحليل شارت حي)
+TradingView -> Grok -> Telegram Bot (+ محادثة تفاعلية مع تحليل شارت حي)
 ============================================================================
 1) /webhook   : يستقبل تنبيهات من استراتيجية Flipping Markets في TradingView
-                ويرسلها + تعليق Gemini إلى تيليجرام.
+                ويرسلها + تعليق Grok إلى تيليجرام.
 2) /telegram  : يستقبل رسائلك أنت من تيليجرام، يرسم شارت شموع حي حقيقي
                 لرمز XAUUSD من بيانات سوق مباشرة (بدون أي علاقة بحسابك في
-                TradingView)، ويرسله مع سؤالك لـ Gemini Vision ليحلله بصريًا.
+                TradingView)، ويرسله مع سؤالك لـ Grok Vision ليحلله بصريًا.
 
 متغيرات البيئة المطلوبة:
     TELEGRAM_BOT_TOKEN  - التوكن من BotFather
     TELEGRAM_CHAT_ID    - رقم محادثتك (نفس الرقم يُستخدم كحماية: البوت
                           يتجاهل أي رسالة تجيه من رقم مختلف)
     WEBHOOK_SECRET      - (اختياري) كلمة سر لحماية رابط /webhook
-    GEMINI_API_KEY      - مفتاح Gemini API
+    XAI_API_KEY         - مفتاح Grok (xAI) API من console.x.ai
     TWELVEDATA_API_KEY  - مفتاح مجاني من twelvedata.com لجلب أسعار الذهب الحية
 """
 
@@ -30,19 +30,20 @@ import requests
 from flask import Flask, jsonify, request
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("tv-gemini-telegram-bot")
+log = logging.getLogger("tv-grok-telegram-bot")
 
 app = Flask(__name__)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "")
 
 TELEGRAM_SEND_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 TELEGRAM_PHOTO_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-GEMINI_TEXT_API = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={GEMINI_API_KEY}"
+GROK_API = "https://api.x.ai/v1/chat/completions"
+GROK_MODEL = "grok-4.5"
 SYMBOL = "XAU/USD"
 
 
@@ -123,11 +124,11 @@ def render_chart(df: pd.DataFrame) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Gemini
+# Grok
 # ---------------------------------------------------------------------------
-def ask_gemini_vision(image_bytes: bytes, question: str) -> str:
-    if not GEMINI_API_KEY:
-        return "لم يتم ضبط GEMINI_API_KEY بعد."
+def ask_grok_vision(image_bytes: bytes, question: str) -> str:
+    if not XAI_API_KEY:
+        return "لم يتم ضبط XAI_API_KEY بعد."
 
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     prompt = (
@@ -136,37 +137,41 @@ def ask_gemini_vision(image_bytes: bytes, question: str) -> str:
         f"في الصورة فعليًا فقط (لا تخترع أرقامًا غير ظاهرة):\n\n{question}"
     )
     payload = {
-        "contents": [
+        "model": GROK_MODEL,
+        "messages": [
             {
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": "image/png", "data": b64}},
-                ]
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
             }
-        ]
+        ],
     }
+    headers = {"Authorization": f"Bearer {XAI_API_KEY}"}
     try:
-        resp = requests.post(GEMINI_TEXT_API, json=payload, timeout=30)
+        resp = requests.post(GROK_API, json=payload, headers=headers, timeout=45)
         resp.raise_for_status()
         result = resp.json()
-        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return result["choices"][0]["message"]["content"].strip()
     except (requests.RequestException, KeyError, IndexError) as e:
-        log.error("Gemini vision request failed: %s", e)
+        log.error("Grok vision request failed: %s", e)
         return "صار خطأ أثناء تحليل الشارت، جرب بعد شوي."
 
 
-def ask_gemini_text(question: str) -> str:
-    if not GEMINI_API_KEY:
-        return "لم يتم ضبط GEMINI_API_KEY بعد."
-    payload = {"contents": [{"parts": [{"text": question}]}]}
+def ask_grok_text(question: str) -> str:
+    if not XAI_API_KEY:
+        return "لم يتم ضبط XAI_API_KEY بعد."
+    payload = {"model": GROK_MODEL, "messages": [{"role": "user", "content": question}]}
+    headers = {"Authorization": f"Bearer {XAI_API_KEY}"}
     try:
-        resp = requests.post(GEMINI_TEXT_API, json=payload, timeout=45)
+        resp = requests.post(GROK_API, json=payload, headers=headers, timeout=45)
         resp.raise_for_status()
         result = resp.json()
-        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return result["choices"][0]["message"]["content"].strip()
     except (requests.RequestException, KeyError, IndexError) as e:
-        log.error("Gemini text request failed: %s", e)
-        return "صار خطأ أثناء التواصل مع Gemini."
+        log.error("Grok text request failed: %s", e)
+        return "صار خطأ أثناء التواصل مع Grok."
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +210,7 @@ def webhook():
 
 
 # ---------------------------------------------------------------------------
-# مسار /telegram (محادثتك مع Gemini عبر البوت)
+# مسار /telegram (محادثتك مع Grok عبر البوت)
 # ---------------------------------------------------------------------------
 CHART_KEYWORDS = ["شارت", "الشارت", "حلل", "تحليل", "سعر", "chart", "analy"]
 
@@ -227,13 +232,13 @@ def telegram_updates():
         try:
             df = fetch_ohlc()
             image_bytes = render_chart(df)
-            answer = ask_gemini_vision(image_bytes, text)
+            answer = ask_grok_vision(image_bytes, text)
             send_telegram_photo(image_bytes, caption=f"🤖 {answer}")
         except Exception as e:  # noqa: BLE001
             log.error("Chart analysis failed: %s", e)
             send_telegram_message("تعذّر جلب الشارت حاليًا، جرب بعد شوي.")
     else:
-        answer = ask_gemini_text(text)
+        answer = ask_grok_text(text)
         send_telegram_message(f"🤖 {answer}")
 
     return jsonify({"status": "ok"}), 200
@@ -241,7 +246,7 @@ def telegram_updates():
 
 @app.route("/", methods=["GET"])
 def health():
-    return "TradingView -> Gemini -> Telegram bot is running.", 200
+    return "TradingView -> Grok -> Telegram bot is running.", 200
 
 
 if __name__ == "__main__":
